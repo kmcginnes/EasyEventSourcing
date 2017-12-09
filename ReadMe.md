@@ -7,7 +7,7 @@ The purpose of **EasyEventSourcing** is to showcase a working Application with i
 
 Disclaimer: Although I have experienced the beauty of CQRS and DDD in production applications, I am yet to use Event Sourcing in a production system. The below write up and resulting code was born out of many many hours spent reading, youtubing, thinking, tinkering and arguing about Domain Driven Design, CQRS, Clean Code and Event Sourcing. I am pretty confident in the work but I am always open to correction, suggestions, fixes and pull requests. (This is a work in progress, not all the domain features have been implemented and I am still iffy about some of the command code)
 
-##A Very Simple Overview of Event Sourcing
+## A Very Simple Overview of Event Sourcing
 
 Event Sourcing is **Command Query Responsibility Segregation (CQRS)**, with the added benefit of no data loss. 
 
@@ -21,7 +21,7 @@ We take events, replay them to build up state in appropriate read models that ar
 
 ![Overview](Overview.PNG)
 
-##A Detailed Overview of the System
+## A Detailed Overview of the System
 
 Here is the typical flow through the application.
 
@@ -48,8 +48,8 @@ Once Events have been persisted to the EventStore, they can be processed by **Ev
 
 EventHandlers should be idempotent, meaning they can process the same event multiple times, reproducing the exact same result (for example if we receive the same email triggering event multiple times, we should still only send the email once).
 
-#Implementation Overview
-##Messages (Commands and Events)
+# Implementation Overview
+## Messages (Commands and Events)
 
 At the core of any event sourcing implementation is the **Messages** that the application can send. These messages form a contract with the outside world. There are two types of messages
 
@@ -63,20 +63,20 @@ I have chosen to implement all messages using F# records. This provides the foll
 * Immutable by default - the constructor is implemented by default, reducing the amount of code that needs to be written.
 * Structural Equality - this means event equality can be tested directly without the need to override the equals method, thus reducing the amount of code that needs to be written.
 
-##Application
+## Application
 Along with the messages, the **Application** is what the outside world interacts with to change our system. Changes to the system are triggered by sending a command to the Application. The following classes live in `EasyEventSourcing.Application`.
 
-###CommandDispatcher
+### CommandDispatcher
 The CommandDispatcher is the only entry point into our system. It receives Commands via its `Send` method. It requires a `CommandHandlerFactory` to provide it with the matching `CommandHandler`. It then passes the Command to the CommandHandler.
 
-###CommandHandlerFactory
+### CommandHandlerFactory
 The CommandHandlerFactory resolves `CommandHandlers` based on the type of the command. In this implementation I have chosen not to rely on a typical dependency injection container for resolving dependencies, like Castle Windsor, but to implement my own command handler resolver. The CommandHandlerFactory has at its heart a dictionary with Command Type as Key, and as values factory functions that create the CommandHandlers. In EasyEventSourcing there is a single instance of the EventStore and everything else is short lived (transient). The EventStore instance is passed to the CommandHandlerFactory as a dependency. This allows for easy mocking of the EventStore during testing.
 
-##Domain
-###CommandHandlers
+## Domain
+### CommandHandlers
 CommandHandlers can be seen as the Application Services of the domain. Their main purpose is orchestration. Based on the Command, they will get the current state from the Repository, trigger the relevant domain logic (via an aggregate), and push the resulting state back to the Repository for Persistence. CommandHandlers all inherit from `ICommandHandler<TCommand>`.
 
-###EventStreams (Aggregates and Sagas)
+### EventStreams (Aggregates and Sagas)
 The bulk of the domain logic is implemented using Aggregates and Sagas. The simplest way to describe the difference is
 
 * Aggregates generate Events from Commands. Mainly used to implement logic inside a bounded context.
@@ -106,32 +106,32 @@ NOTE:
 
 The same is done for Saga's however they are modeled as `f(Events, Event) => (Command(s), Event(s))`.
 
-###StreamIdentifier
+### StreamIdentifier
 Streams are identified by using the Aggregate/Saga name as well as the relevant id (Example: `ShoppingCart-809b71b5-1fc5-4039-b7fe-5d23aa58c5b4`). 
 
-##Persistence
-###Repository
+## Persistence
+### Repository
 The Repository is responsible for getting a stream of events from the EventStore (based on the StreamIdentifier), creating the relevant EventStream object (either an Aggregate or Saga), replaying the events onto that stream to rebuild the state and finally giving the EventStream object back to the CommandHandler. This is all achieved with the `T GetById<T>(Guid id) where T : EventStream` method.
 
 Secondly it takes EventStream objects and passes the newly created events to the EventStore for saving. This is done using `void Save(EventStream stream)`.
 
 I considered implementing a unit of work for persistence across multiple aggregates, but this can just as easily be modeled using `void Save(params EventStream[] streamItems)`. Events are bundled before they are sent to the EventStore for saving, simulating a transaction accross aggregates. We can then use the transactions of the database implementation at the database level to ensure all events are persisted.
 
-###EventStore
+### EventStore
 The EventStore simply persists events. Currently EasyEventSourcing uses an in-memory EventStore. [EventStore](https://geteventstore.com/) is the EventStore database of choice.
 
-###EventStoreStream
+### EventStoreStream
 This is a transport class holding a stream id and the related events.
 
-##Event Handlers
+## Event Handlers
 The role of Event Handlers are described above. See the domain implementation details for more spesific use cases. 
 
 In EasyEventStore I chose to just call the EventDispatcher directly when saving events in the in-memory EventStore. In real world applications we might defer this to some other mechanism, making our system eventually consistent. 
 
-#EventDispatcher and EventHandlerFactory
+# EventDispatcher and EventHandlerFactory
 These work similarly to the CommandDispatcher and CommandHandlerFactory, however an event can have 0 to many handlers as opposed to only one handler for a command.
 
-##Testing
+## Testing
 Messages can be seen as contract between the application and the outside world. A kind of interface. Using this concept, the entire write system can be modeled as `f(events,command) => event(s)`. This can be leveraged to achieve the following:
 
 *	Given `Events`
@@ -142,30 +142,30 @@ By mocking the EventStore and using the CommandDispatcher as test entry point, i
 
 However! I am not sure if this is actually a good thing. Testing if an EmptyCart Event was created does not prove that the CartAggregate is infact empty. Hmmmm
 
-#Domain
-##Rules
+# Domain
+## Rules
 A simple store domain was chosen as everyone is familiar with it. Rules where chosen in such a way as to provide examples of bounded context, eventual consistency and saga's.
-###Shopping Cart
+### Shopping Cart
 
 * You should be able to add and remove items from a shopping cart as well as empty a shopping cart
 * When you checkout a shopping cart, an order is created
 
-###Orders
+### Orders
 
 * You should be able to pay for an order
 * You should be able to confirm the delivery address for an order
 
-###Shipping
+### Shipping
 
 * Once an order is and paid and address confirmed a shipping instruction should be created. For added complexity there is no sequence for paying and ordering, thus a saga is required for generating the shipping instruction.
 
-###Customer
+### Customer
 
 * If an order is shipped to a new address, the address should be added to the customer
 
-##Implementation Details
+## Implementation Details
 
-###Shopping Cart
+### Shopping Cart
 
 * When sending a command to the shopping cart, the read model is checked to see if a cart exists. If a cart does not exist, we create one.
 * A cart is created using the factory function on the shopping cart class. Note that the consumer provides the cart id, thus we are not reliant on a database to generate an id for us. Internally the factory function creates a CartCreated event. 
@@ -173,26 +173,26 @@ A simple store domain was chosen as everyone is familiar with it. Rules where ch
 * When checking out, the shopping cart returns an Order aggregate. 
 * Finally the cart is removed from the read model as it no longer exists.
 
-###Orders
+### Orders
 
 * Orders are created when checking out a cart.
 * Orders need to be paid for and be provided with a shipping address.
 * Orders are completed once the packages are shipped
 
-###Shipping (todo)
+### Shipping (todo)
 
 * A shipping instruction is created when an order has been paid for and a shipping address has been provided.
 * The shipping logic is implemented by using a saga as a state machine. The saga is generated from the OrderCreated Event. Once the saga has all the detail it needs, it will generate the shipping instruction as a command and send it to the relevant CommandHandler.
 * We will assume a shipping instruction equates to a delivered package and mark our Order as complete.
 
-###Customer Details (todo)
+### Customer Details (todo)
 
 We want to add the Shipping address to the customer if it does not exist. Thinking traditionally one would want to put this on the customer Aggregate. However keeping a list of shipping addresses is mainly there to provide convenience to the customer (it is bad ux to have them fill out the same address constantly)  and we are not really working with addresses seperatly as logic. Therefore we just build a read model containing all the customer addresses. This is a fundamental difference from traditional thinking. The aggregate state should only care about the business logic and properties not relating to the business logic should not be contained in the aggregate.  An aggregate will not have any public properties, only public methods that execute logic. However the data is not lost as we keep all history inside our events. Thus we can build up read models separatly from write models. Boom CQRS. 
 
-##Read Models (todo)
+## Read Models (todo)
 In this example the read models will simply be in-memory objects that keep state. The concepts however can be easily scaled to more appropriate datastore implementations.
 
-#Other Areas Not Yet Explored
+# Other Areas Not Yet Explored
 
 * **Snapshots** - Used to save state when there are many events in a stream
 * **Saving Commandse** - Gives the ability to replay all actions against a changed domain and compare the differences. Also acts as a log.
